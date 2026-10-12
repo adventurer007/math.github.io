@@ -1994,16 +1994,48 @@ function init(){
   function keyToMf(k){ return MF_KEY[k]!==undefined ? MF_KEY[k] : k; }
   
   /* MathLive: подключение редактора к полю ответа. Поле ввода остаётся источником истины: сайт проверяет строку из него. */
-  var MATHLIVE_URL='https://cdn.jsdelivr.net/npm/mathlive@0.100.0/mathlive.min.js';
+  var MATHLIVE_URLS=[
+    'https://cdn.jsdelivr.net/npm/mathlive@0.100.0/mathlive.min.js',
+    'https://cdn.jsdelivr.net/npm/mathlive@0.100.0/dist/mathlive.min.js',
+    'https://unpkg.com/mathlive@0.100.0/dist/mathlive.min.js',
+    'https://unpkg.com/mathlive@0.100.0/mathlive.min.js',
+    'https://cdn.jsdelivr.net/npm/mathlive'
+  ];
   var MF={loading:false, failed:false, fields:{}, lx:{}};
+  function mlReady(){ return !!(window.MathfieldElement || (window.customElements&&customElements.get('math-field'))); }
+  /* адреса пробуются по очереди: если путь к файлу на CDN другой, берётся следующий */
   function loadMathLive(){
-    if(MF.loading||MF.failed||window.MathfieldElement) return;
-    MF.loading=true;
-    var sc=document.createElement('script');
-    sc.src=MATHLIVE_URL;
-    sc.onload=function(){ MF.loading=false; mountMath('ans'); mountMath('tans'); };
-    sc.onerror=function(){ MF.loading=false; MF.failed=true; };
+    if(MF.loading||MF.failed||mlReady()) return;
+    MF.loading=true; tryMathLive(0);
+  }
+  function tryMathLive(i){
+    if(i>=MATHLIVE_URLS.length){ MF.loading=false; MF.failed=true; mfNotice(); return; }
+    var url=MATHLIVE_URLS[i], sc=document.createElement('script'), done=false;
+    function ready(){
+      if(done) return; done=true; MF.loading=false;
+      try{ if(window.MathfieldElement && /\.js$/.test(url)) window.MathfieldElement.fontsDirectory=url.replace(/\/[^\/]*$/,'')+'/fonts'; }catch(e){}
+      mountMath('ans'); mountMath('tans');
+    }
+    function next(){ if(done) return; done=true; try{ sc.remove(); }catch(e){} tryMathLive(i+1); }
+    sc.src=url; sc.async=true;
+    sc.onload=function(){
+      if(mlReady()){ ready(); return; }
+      /* элемент мог зарегистрироваться чуть позже */
+      if(window.customElements) customElements.whenDefined('math-field').then(ready,function(){});
+      setTimeout(next,2000);
+    };
+    sc.onerror=next;
     document.head.appendChild(sc);
+  }
+  /* если редактор не загрузился, об этом говорится прямо на странице */
+  function mfNotice(){
+    ['ans','tans'].forEach(function(id){
+      var inp=$('#'+id); if(!inp||inp.dataset.mfnote||inp.dataset.mf) return;
+      inp.dataset.mfnote='1';
+      var n=document.createElement('div'); n.className='mhint';
+      n.textContent='Редактор формул не загрузился (нет интернета или страница открыта во встроенном просмотре). Вводите ответ с клавиатуры: / дробь, ^ степень, sqrt( ) корень.';
+      inp.parentNode.parentNode.insertBefore(n,inp.parentNode);
+    });
   }
   function hintSeen(){ try{ return localStorage.getItem('uroki-mhint')==='1'; }catch(e){ return true; } }
   function markHintSeen(){ try{ localStorage.setItem('uroki-mhint','1'); }catch(e){} }
@@ -2027,7 +2059,7 @@ function init(){
   }
   function mountMath(id){
     var inp=$('#'+id); if(!inp||inp.dataset.mf) return;
-    if(!window.MathfieldElement){ loadMathLive(); return; }
+    if(!mlReady()){ if(MF.failed) mfNotice(); else loadMathLive(); return; }
     var row=inp.parentNode;
     var mf=document.createElement('math-field');
     mf.className='mf';
