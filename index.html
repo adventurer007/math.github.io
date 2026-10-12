@@ -366,6 +366,12 @@ html[data-font="jetbrains"]{--f-display:'JetBrains Mono',ui-monospace,monospace;
 /* Математический редактор (MathLive) */
 .mf{flex:1;min-width:0;font-size:1.25rem;padding:.4rem .6rem;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);--keyboard-toggle-display:none}
 .mf:focus-within{outline:2px solid var(--accent-wash);border-color:var(--accent)}
+/* редактор формул: только дроби, степени и корни. Меню, экранная клавиатура и прочие функции отключены */
+.mf::part(menu-toggle),.mf::part(virtual-keyboard-toggle){display:none}
+.mf{--selection-background-color:var(--accent-wash);--selection-color:var(--ink);--contains-highlight-background-color:transparent;
+  --caret-color:var(--accent);--placeholder-color:var(--ink-soft);--primary-color:var(--accent);--text-font-family:inherit}
+math-virtual-keyboard,.ML__keyboard,#mathlive-virtual-keyboard-container{display:none!important}
+.ML__menu,.ML__popover{display:none!important}
 .mhint{font-size:.85rem;color:var(--ink-soft);margin:.25rem 0 .45rem}
 .mhint.pulse{animation:mpulse 1.2s ease 2}
 @keyframes mpulse{0%,100%{color:var(--ink-soft)}50%{color:var(--accent)}}
@@ -2002,6 +2008,7 @@ function init(){
     'https://cdn.jsdelivr.net/npm/mathlive'
   ];
   var MF={loading:false, failed:false, fields:{}, lx:{}};
+  var MF_SHORTCUTS={sqrt:'\\sqrt{#?}', cbrt:'\\sqrt[3]{#?}', pm:'\\pm'};
   function mlReady(){ return !!(window.MathfieldElement || (window.customElements&&customElements.get('math-field'))); }
   /* адреса пробуются по очереди: если путь к файлу на CDN другой, берётся следующий */
   function loadMathLive(){
@@ -2064,10 +2071,19 @@ function init(){
     var mf=document.createElement('math-field');
     mf.className='mf';
     mf.setAttribute('aria-label','Ваш ответ');
-    try{ mf.mathVirtualKeyboardPolicy='manual'; }catch(e){}
+    mf.setAttribute('math-virtual-keyboard-policy','manual');
     inp.dataset.mf='1'; inp.hidden=true;
     row.insertBefore(mf,inp);
     MF.fields[id]=mf;
+    /* только то, что нужно для ответа: набор с обычной клавиатуры телефона, без меню и экранной клавиатуры */
+    [function(){ mf.mathVirtualKeyboardPolicy='manual'; },
+     function(){ mf.menuItems=[]; },
+     function(){ mf.smartMode=false; },
+     function(){ mf.defaultMode='math'; },
+     function(){ mf.inlineShortcuts=MF_SHORTCUTS; },
+     function(){ if(window.mathVirtualKeyboard) window.mathVirtualKeyboard.visible=false; }
+    ].forEach(function(f){ try{ f(); }catch(e){} });
+    mf.addEventListener('contextmenu',function(e){ e.preventDefault(); e.stopPropagation(); },true);
     mf.setValue(MF.lx[inp.value]||inp.value||'');
     mf.addEventListener('input',function(){ syncFromMf(id); if(hint) hint.hidden=true; markHintSeen(); });
     mf.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); onEnter(id); } });
