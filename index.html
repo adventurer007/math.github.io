@@ -363,6 +363,15 @@ html[data-font="caveat"]{--f-display:Caveat,cursive;--f-body:Caveat,cursive}
 html[data-font="jetbrains"]{--f-display:'JetBrains Mono',ui-monospace,monospace;--f-body:'JetBrains Mono',ui-monospace,monospace}
 [data-pref="font"][data-val="jetbrains"]{font-family:'JetBrains Mono',ui-monospace,monospace}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* Математический редактор (MathLive) */
+.mf{flex:1;min-width:0;font-size:1.25rem;padding:.4rem .6rem;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);--keyboard-toggle-display:none}
+.mf:focus-within{outline:2px solid var(--accent-wash);border-color:var(--accent)}
+.mhint{font-size:.85rem;color:var(--ink-soft);margin:.25rem 0 .45rem}
+.mhint.pulse{animation:mpulse 1.2s ease 2}
+@keyframes mpulse{0%,100%{color:var(--ink-soft)}50%{color:var(--accent)}}
+.mpad{display:flex;gap:.35rem;flex-wrap:wrap;margin:.4rem 0 .2rem}
+.mpad .btn{min-width:2.4rem;min-height:2.2rem;padding:.2rem .5rem}
+@media (prefers-reduced-motion:reduce){.mhint.pulse{animation:none}}
 </style>
 
 <div class="sheet">
@@ -1919,7 +1928,143 @@ function init(){
   function keysHtml(type){
     return '<div class="keys" aria-label="Вставка символов">'+keySet(type).map(function(k){return '<button type="button" data-ins="'+k[1]+'" aria-label="Вставить '+esc(k[0])+'">'+fmt(k[0]==='x²'?'x^2':k[0])+'</button>';}).join('')+'</div>';
   }
+/* ---------- Математический редактор: перевод между LaTeX (MathLive) и строкой ответа сайта ---------- */
+  // Строка ответа — та же, что вводят с клавиатуры: (x-1)/(x+4), x^2+1, sqrt(x), cbrt(x).
+  function mfTake(t,i){
+    if(t.charAt(i)==='{'){
+      var d=0;
+      for(var j=i;j<t.length;j++){
+        var c=t.charAt(j);
+        if(c==='{') d++;
+        else if(c==='}'){ d--; if(d===0) return {s:t.slice(i+1,j), end:j+1}; }
+      }
+      return {s:t.slice(i+1), end:t.length};
+    }
+    return {s:t.charAt(i), end:i+1};
+  }
+  var MF_SYM={infty:'∞',cup:'∪',le:'≤',leq:'≤',ge:'≥',geq:'≥',pm:'±',mp:'∓',cdot:'*',times:'*',div:'/',neq:'≠'};
+  var MF_SKIP={left:1,right:1,displaystyle:1,textstyle:1,mathrm:1,mathit:1,mathbf:1,text:1,quad:1,qquad:1,big:1,Big:1};
+  function mfToPlain(src){
+    var t=String(src==null?'':src), out='', i=0;
+    while(i<t.length){
+      var c=t.charAt(i);
+      if(c==='\\'){
+        var m=/^\\([a-zA-Z]+)/.exec(t.slice(i));
+        if(!m){                                   // \{ \} \% и т.п.; пробельные команды \, \; \! пропускаем
+          var nx=t.charAt(i+1);
+          if(!/[,;:! ]/.test(nx)) out+=nx;
+          i+=2; continue;
+        }
+        var name=m[1]; i+=m[0].length;
+        if(name==='frac'||name==='dfrac'||name==='tfrac'){
+          var a=mfTake(t,i); i=a.end;
+          var b=mfTake(t,i); i=b.end;
+          out+='('+mfToPlain(a.s)+')/('+mfToPlain(b.s)+')';
+          continue;
+        }
+        if(name==='sqrt'){
+          var n=null;
+          if(t.charAt(i)==='['){ var e=t.indexOf(']',i); n=t.slice(i+1,e); i=e+1; }
+          var r=mfTake(t,i); i=r.end;
+          var inner=mfToPlain(r.s);
+          if(n===null||n==='2') out+='sqrt('+inner+')';
+          else if(n==='3') out+='cbrt('+inner+')';
+          else out+='('+inner+')^(1/('+n+'))';
+          continue;
+        }
+        if(MF_SYM[name]!==undefined){ out+=MF_SYM[name]; continue; }
+        if(MF_SKIP[name]!==undefined) continue;   // группа после \text, \mathrm и т.п. остаётся, сама команда уходит
+        out+=name;                                // прочие команды (например \alpha) оставляем словом
+        continue;
+      }
+      if(c==='^'||c==='_'){
+        var s2=mfTake(t,i+1); i=s2.end;
+        var v=mfToPlain(s2.s);
+        out+=c+(v.length>1?'('+v+')':v);
+        continue;
+      }
+      if(c==='{'||c==='}'||c===' '||c==='\u00a0'){ i++; continue; }
+      out+=c; i++;
+    }
+    return out.replace(/\s+/g,' ').trim();
+  }
+  // Кнопка символов → шаблон редактора. Ключи сайта вставляют строку; здесь она превращается в конструкцию.
+  var MF_KEY={'^2':'^{2}','x²':'^{2}','√(':'\\sqrt{#?}','cbrt(':'\\sqrt[3]{#?}','/':'\\frac{#@}{#?}',
+    '±':'\\pm','∞':'\\infty',' ∪ ':'\\cup ','≤':'\\le','≥':'\\ge','; ':';'};
+  function keyToMf(k){ return MF_KEY[k]!==undefined ? MF_KEY[k] : k; }
+  
+  /* MathLive: подключение редактора к полю ответа. Поле ввода остаётся источником истины: сайт проверяет строку из него. */
+  var MATHLIVE_URL='https://cdn.jsdelivr.net/npm/mathlive@0.100.0/mathlive.min.js';
+  var MF={loading:false, failed:false, fields:{}, lx:{}};
+  function loadMathLive(){
+    if(MF.loading||MF.failed||window.MathfieldElement) return;
+    MF.loading=true;
+    var sc=document.createElement('script');
+    sc.src=MATHLIVE_URL;
+    sc.onload=function(){ MF.loading=false; mountMath('ans'); mountMath('tans'); };
+    sc.onerror=function(){ MF.loading=false; MF.failed=true; };
+    document.head.appendChild(sc);
+  }
+  function hintSeen(){ try{ return localStorage.getItem('uroki-mhint')==='1'; }catch(e){ return true; } }
+  function markHintSeen(){ try{ localStorage.setItem('uroki-mhint','1'); }catch(e){} }
+  function syncFromMf(id){
+    var inp=$('#'+id), mf=MF.fields[id]; if(!inp||!mf) return;
+    var latex=mf.getValue('latex'), plain=mfToPlain(latex);
+    MF.lx[plain]=latex;
+    inp.value=plain;
+    inp.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  /* выставить ответ (восстановление из теста и т.п.) и обновить редактор, если он включён */
+  function setAns(id,v){
+    var inp=$('#'+id); if(!inp) return;
+    if(inp.value!==v) inp.value=v;
+    var mf=MF.fields[id];
+    if(mf&&mf.isConnected&&mfToPlain(mf.getValue('latex'))!==v) mf.setValue(MF.lx[v]||v);
+  }
+  function onEnter(id){
+    if(id==='ans'){ doCheck(); return; }
+    if(T&&T.qs&&T.i<T.qs.length-1) jumpQ(T.i+1);
+  }
+  function mountMath(id){
+    var inp=$('#'+id); if(!inp||inp.dataset.mf) return;
+    if(!window.MathfieldElement){ loadMathLive(); return; }
+    var row=inp.parentNode;
+    var mf=document.createElement('math-field');
+    mf.className='mf';
+    mf.setAttribute('aria-label','Ваш ответ');
+    try{ mf.mathVirtualKeyboardPolicy='manual'; }catch(e){}
+    inp.dataset.mf='1'; inp.hidden=true;
+    row.insertBefore(mf,inp);
+    MF.fields[id]=mf;
+    mf.setValue(MF.lx[inp.value]||inp.value||'');
+    mf.addEventListener('input',function(){ syncFromMf(id); if(hint) hint.hidden=true; markHintSeen(); });
+    mf.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); onEnter(id); } });
+    mf.addEventListener('focusin',function(){ if(hint&&!hintSeen()) hint.classList.add('pulse'); });
+    /* подсказка над полем и панель стрелок под полем */
+    var hint=null;
+    if(!hintSeen()){
+      hint=document.createElement('div');
+      hint.className='mhint';
+      hint.textContent='Нажмите / для двухэтажной дроби, ^ для степени, √ для корня. Перемещайтесь между блоками стрелками.';
+      row.parentNode.insertBefore(hint,row);
+    }
+    var pad=document.createElement('div');
+    pad.className='mpad';
+    pad.innerHTML='<button type="button" class="btn" data-mfc="moveToPreviousChar" aria-label="Влево">←</button>'+
+      '<button type="button" class="btn" data-mfc="moveToNextChar" aria-label="Вправо">→</button>'+
+      '<button type="button" class="btn" data-mfc="moveUp" aria-label="Вверх">↑</button>'+
+      '<button type="button" class="btn" data-mfc="moveDown" aria-label="Вниз">↓</button>'+
+      '<button type="button" class="btn" data-mfc="deleteBackward" aria-label="Удалить">⌫</button>';
+    pad.addEventListener('pointerdown',function(e){ e.preventDefault(); });
+    pad.addEventListener('click',function(e){
+      var b=e.target.closest('[data-mfc]'); if(!b||!mf.isConnected) return;
+      mf.executeCommand(b.dataset.mfc); mf.focus();
+    });
+    row.insertAdjacentElement('afterend',pad);
+  }
   function insertAt(id,text){
+    var mfld=MF.fields[id];
+    if(mfld&&mfld.isConnected){ mfld.insert(keyToMf(text)); mfld.focus(); syncFromMf(id); return; }
     var inp=$('#'+id); if(!inp) return;
     var a=inp.selectionStart, b=inp.selectionEnd;
     if(a==null){a=b=inp.value.length;}
@@ -1953,6 +2098,7 @@ function init(){
       '<div id="hintbox" class="hintbox" hidden></div>'+
       howBtn()+'<div class="actions"><button class="btn" data-act="hint">Подсказка</button><button class="btn" data-act="reveal" id="revbtn">Показать ответ</button></div>'+
       '<div class="nav"><button class="btn" data-act="prev">← Назад</button><button class="btn" data-act="next" id="nextbtn">Далее →</button></div>';
+    mountMath('ans');
     if(st.st==='ok') setFb('ok','<span class="ic">✓</span>Решено.'+ansLine(p));
     else if(st.st==='rev') setFb('rev','Ответ был показан.'+ansLine(p));
     renderDots(); renderChips();
@@ -2079,6 +2225,7 @@ function init(){
         var inp0=$('#tans');
         inp0.addEventListener('input',function(){ T.ans[T.i]=inp0.value.trim(); paintPlate(); });
         inp0.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); if(T.i<T.qs.length-1) jumpQ(T.i+1); } });
+        mountMath('tans');
         /* нажатия на номера и символы не отнимают фокус у поля: клавиатура не мигает */
         var keepFocus=function(e){ if(e.target.closest&&e.target.closest('.plate button,.keys button')) e.preventDefault(); };
         card.addEventListener('pointerdown',keepFocus);
@@ -2088,8 +2235,8 @@ function init(){
       card.querySelector('.q-head').innerHTML='<span class="pn">Вопрос '+(T.i+1)+' из '+n+'</span><span>без ответа: '+unanswered()+'</span>';
       card.querySelector('.q-plate').innerHTML=plateHtml();
       card.querySelector('.q-stmt').innerHTML=stmt(p);
-      var inp=$('#tans'), v=T.ans[T.i]||'';
-      if(inp.value!==v) inp.value=v;
+      var v=T.ans[T.i]||'';
+      setAns('tans',v);
       if(card.dataset.kt!==p.type){ card.querySelector('.q-keys').innerHTML=keysHtml(p.type).replace(/data-ins/g,'data-tins'); card.dataset.kt=p.type; }
       return;
     }
@@ -3469,4 +3616,3 @@ function init(){
 if(typeof document!=='undefined') init();
 })();
 </script>
-
