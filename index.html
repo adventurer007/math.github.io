@@ -1957,9 +1957,9 @@ function init(){
   function mTop(t,ch){ var d=0; for(var i=0;i<t.length;i++){ var c=t[i]; if(c==='(') d++; else if(c===')') d--; else if(c===ch && d===0) return i; } return -1; }
   function mSeq(t){
     if(!t) return '&nbsp;';
-    var r=mSplit(t,'+-=*'), out='';
+    var r=mSplit(t,'+-=*;,±'), out='';
     r.parts.forEach(function(p,i){
-      if(i>0){ var sp={'+':' + ','-':' − ','=':' = ','*':' · '}[r.seps[i-1]]; out+=sp; }
+      if(i>0){ var sp={'+':' + ','-':' − ','=':' = ','*':' · ',';':'; ',',':', ','±':' ± '}[r.seps[i-1]]; out+=sp; }
       out+=mTerm(p);
     });
     return out;
