@@ -94,6 +94,7 @@ h1::after{content:"";display:block;width:3.2em;height:3px;margin-top:6px;backgro
 .lb .pl{font-size:1.15rem;text-align:center}
 .lb .sub{display:block;font-size:.8rem;font-weight:400;color:var(--ink-soft)}
 .lb .pts{font-variant-numeric:tabular-nums;color:var(--ink-soft);font-weight:400}
+.dbadge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:.72rem;font-weight:700;letter-spacing:.02em;background:var(--warn);color:var(--on-accent);vertical-align:middle;white-space:nowrap}
 .tabs-ind{position:absolute;top:6px;bottom:calc(6px + env(safe-area-inset-bottom,0px));left:8px;width:calc((100% - 16px - 12px)/4);border-radius:12px;background:var(--line);transform:translateX(calc(var(--i,0)*(100% + 4px)));transition:transform .3s cubic-bezier(.22,.8,.3,1);pointer-events:none}
 .tabs.drag .tabs-ind{transition:none}
 main{position:relative;overflow-x:clip}
@@ -3170,7 +3171,7 @@ function init(){
         body='<ol class="lb">'+shown.map(function(it){
           if(!it) return '<li class="gap" aria-hidden="true">…</li>';
           var r=it.r, ri=leagueIndex(r.x), medal=['🥇','🥈','🥉'][it.place-1]||it.place;
-          return '<li'+(me&&r.k===me?' class="me"':'')+'><span class="pl">'+medal+'</span><span>'+esc(r.n)+
+          return '<li'+(me&&r.k===me?' class="me"':'')+'><span class="pl">'+medal+'</span><span>'+esc(r.n)+(r.d?' <span class="dbadge">Донатер</span>':'')+
             '<span class="sub">'+esc(rankLabel(ri,r.n))+(scope==='all'?' · '+esc(r.g):'')+'</span></span><span class="pts">'+r.x+' XP</span></li>';
         }).join('')+'</ol>';
       }
